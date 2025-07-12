@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SimpleSwap</title>
+    <style>
+      body {
+        font-family: Arial;
+        margin: 20px;
+      }
+      button {
+        padding: 10px;
+        margin: 5px;
+      }
+      input {
+        padding: 5px;
+        margin: 5px;
+      }
+      .error {
+        color: red;
+      }
+      .success {
+        color: green;
+      }
+      #reserves,
+      #liquidity,
+      #balance {
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SimpleSwap</h1>
+    <button id="connectWallet">Conectar MetaMask</button>
+    <p id="walletAddress"></p>
+    <div id="balance"></div>
+
+    <h2>Mintear Tokens</h2>
+    <label>Cantidad Token A:</label>
+    <input type="number" id="mintAmountA" placeholder="Ej: 10" step="0.0001" />
+    <button id="mintTokenA">Mintear Token A</button>
+    <br />
+    <label>Cantidad Token B:</label>
+    <input type="number" id="mintAmountB" placeholder="Ej: 10" step="0.0001" />
+    <button id="mintTokenB">Mintear Token B</button>
+
+    <h2>Agregar Liquidez</h2>
+    <label>Cantidad Token B:</label>
+    <input type="number" id="amountB" placeholder="Ej: 0.01" step="0.0000001" />
+    <br />
+    <label>Cantidad Token A:</label>
+    <input type="number" id="amountA" placeholder="Ej: 71.97" step="0.0001" />
+    <br />
+    <button id="calculateAmountA">Calcular Token A</button>
+    <button id="approveTokensForLiquidity">Aprobar Tokens</button>
+    <button id="addLiquidity">Agregar Liquidez</button>
+
+    <h2>Intercambiar Tokens</h2>
+    <label>Token de entrada:</label>
+    <select id="tokenIn">
+      <option value="0xb96e56b1d76d11379c516374788ecdf0a72e1a05">
+        Token B
+      </option>
+      <option value="0x06de08ed84b3ca69117d9f725851d4311343392f">
+        Token A
+      </option>
+    </select>
+    <br />
+    <label>Token de salida:</label>
+    <select id="tokenOut">
+      <option value="0x06de08ed84b3ca69117d9f725851d4311343392f">
+        Token A
+      </option>
+      <option value="0xb96e56b1d76d11379c516374788ecdf0a72e1a05">
+        Token B
+      </option>
+    </select>
+    <br />
+    <label>Cantidad:</label>
+    <input
+      type="number"
+      id="amountIn"
+      placeholder="Ej: 0.0001"
+      step="0.0000001"
+    />
+    <br />
+    <label>Slippage (%):</label>
+    <input type="number" id="slippage" value="20" min="0.1" step="0.1" />
+    <br />
+    <label>Obtener precio:</label>
+    <select id="pricePair">
+      <option value="AtoB">Token A en Token B</option>
+      <option value="BtoA">Token B en Token A</option>
+    </select>
+    <button id="getPrice">Obtener Precio</button>
+    <br />
+    <button id="checkReserves">Ver Reservas</button>
+    <button id="approveToken">Aprobar Token</button>
+    <button id="swapTokens">Swap</button>
+    <p id="status"></p>
+    <div id="reserves"></div>
+    <div id="liquidity"></div>
+
+    <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script>
+      if (!window.ethers) {
+        document.getElementById("status").innerText =
+          "Error: No se cargó ethers.js.";
+        document.getElementById("status").className = "error";
+        throw new Error("ethers.js no cargado");
+      }
+
+      const simpleSwapAddress = "0x61c471eee1Dc2cf08ee9620B6c0E89A0aa252E31";
+      const tokenAAddress = "0x06de08ed84b3ca69117d9f725851d4311343392f";
+      const tokenBAddress = "0xb96e56b1d76d11379c516374788ecdf0a72e1a05";
+      const simpleSwapAbi = [
+        "function reserves(address tokenA, address tokenB) external view returns (uint256 reserveA, uint256 reserveB)",
+        "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) external returns (uint256[])",
+        "function addLiquidity(address tokenA, address tokenB, uint256 amountADesired, uint256 amountBDesired, uint256 amountAMin, uint256 amountBMin, address to, uint256 deadline) external returns (uint256 amountA, uint256 amountB, uint256 liquidity)",
+        "function getPrice(address tokenA, address tokenB) external view returns (uint256 price)",
+      ];
+      const tokenAbi = [
+        "function approve(address spender, uint256 amount) external returns (bool)",
+        "function balanceOf(address account) external view returns (uint256)",
+        "function decimals() external view returns (uint8)",
+        "function mint(address to, uint256 amount) external",
+      ];
+
+      let provider, signer, simpleSwapContract, tokenAContract, tokenBContract;
+
+      document.getElementById("connectWallet").onclick = async () => {
+        if (!window.ethereum) {
+          document.getElementById("status").innerText = "Instala MetaMask.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          await window.ethereum.request({ method: "eth_requestAccounts" });
+          provider = new ethers.providers.Web3Provider(window.ethereum);
+          signer = provider.getSigner();
+          const address = await signer.getAddress();
+          document.getElementById(
+            "walletAddress"
+          ).innerText = `Conectado: ${address}`;
+          simpleSwapContract = new ethers.Contract(
+            simpleSwapAddress,
+            simpleSwapAbi,
+            signer
+          );
+          tokenAContract = new ethers.Contract(tokenAAddress, tokenAbi, signer);
+          tokenBContract = new ethers.Contract(tokenBAddress, tokenAbi, signer);
+
+          const balanceA = await tokenAContract.balanceOf(address);
+          const balanceB = await tokenBContract.balanceOf(address);
+          document.getElementById(
+            "balance"
+          ).innerText = `Saldo:\nToken A: ${ethers.utils.formatUnits(
+            balanceA,
+            18
+          )}\nToken B: ${ethers.utils.formatUnits(balanceB, 18)}`;
+          document.getElementById("status").innerText = "MetaMask conectado.";
+          document.getElementById("status").className = "success";
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("mintTokenA").onclick = async () => {
+        if (!signer) {
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          const amount = document.getElementById("mintAmountA").value;
+          if (!amount || amount <= 0) {
+            throw new Error("Ingresa cantidad válida para Token A.");
+          }
+          const amountParsed = ethers.utils.parseUnits(amount, 18);
+          const to = await signer.getAddress();
+          const tx = await tokenAContract.mint(to, amountParsed, {
+            gasLimit: 100000,
+          });
+          document.getElementById("status").innerText = "Minteando Token A...";
+          await tx.wait();
+          document.getElementById(
+            "status"
+          ).innerText = `Minteado: ${amount} Token A`;
+          document.getElementById("status").className = "success";
+          const balanceA = await tokenAContract.balanceOf(to);
+          const balanceB = await tokenBContract.balanceOf(to);
+          document.getElementById(
+            "balance"
+          ).innerText = `Saldo:\nToken A: ${ethers.utils.formatUnits(
+            balanceA,
+            18
+          )}\nToken B: ${ethers.utils.formatUnits(balanceB, 18)}`;
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("mintTokenB").onclick = async () => {
+        if (!signer) {
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          const amount = document.getElementById("mintAmountB").value;
+          if (!amount || amount <= 0) {
+            throw new Error("Ingresa cantidad válida para Token B.");
+          }
+          const amountParsed = ethers.utils.parseUnits(amount, 18);
+          const to = await signer.getAddress();
+          const tx = await tokenBContract.mint(to, amountParsed, {
+            gasLimit: 100000,
+          });
+          document.getElementById("status").innerText = "Minteando Token B...";
+          await tx.wait();
+          document.getElementById(
+            "status"
+          ).innerText = `Minteado: ${amount} Token B`;
+          document.getElementById("status").className = "success";
+          const balanceA = await tokenAContract.balanceOf(to);
+          const balanceB = await tokenBContract.balanceOf(to);
+          document.getElementById(
+            "balance"
+          ).innerText = `Saldo:\nToken A: ${ethers.utils.formatUnits(
+            balanceA,
+            18
+          )}\nToken B: ${ethers.utils.formatUnits(balanceB, 18)}`;
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("checkReserves").onclick = async () => {
+        if (!simpleSwapContract) {
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          const reservesAB = await simpleSwapContract.reserves(
+            tokenAAddress,
+            tokenBAddress
+          );
+          const reservesBA = await simpleSwapContract.reserves(
+            tokenBAddress,
+            tokenAAddress
+          );
+          const reserveA_AB = ethers.utils.formatUnits(reservesAB.reserveA, 18);
+          const reserveB_AB = ethers.utils.formatUnits(reservesAB.reserveB, 18);
+          const reserveA_BA = ethers.utils.formatUnits(reservesBA.reserveA, 18);
+          const reserveB_BA = ethers.utils.formatUnits(reservesBA.reserveB, 18);
+          document.getElementById(
+            "reserves"
+          ).innerText = `Reservas:\nToken A->Token B: ${reserveA_AB} Token A, ${reserveB_AB} Token B\nToken B->Token A: ${reserveA_BA} Token B, ${reserveB_BA} Token A`;
+          if (reserveB_AB < 0.01 || reserveA_BA < 0.01) {
+            document.getElementById("status").innerText =
+              "Liquidez baja. Agrega más (ej: 0.01 Token B).";
+            document.getElementById("status").className = "error";
+          } else {
+            document.getElementById("status").innerText =
+              "Reservas verificadas.";
+            document.getElementById("status").className = "success";
+          }
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("getPrice").onclick = async () => {
+        console.log("Botón Obtener Precio clicado"); // Depuración
+        if (!simpleSwapContract) {
+          console.log("simpleSwapContract no inicializado");
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          console.log("Ejecutando getPrice");
+          const pricePair = document.getElementById("pricePair").value;
+          let tokenA, tokenB, label;
+          if (pricePair === "AtoB") {
+            tokenA = tokenAAddress;
+            tokenB = tokenBAddress;
+            label = "1 Token A =";
+          } else {
+            tokenA = tokenBAddress;
+            tokenB = tokenAAddress;
+            label = "1 Token B =";
+          }
+          const price = await simpleSwapContract.getPrice(tokenA, tokenB);
+          console.log("Precio obtenido:", price.toString());
+          const formattedPrice = ethers.utils.formatUnits(price, 18);
+          document.getElementById(
+            "status"
+          ).innerText = `${label} ${formattedPrice} ${
+            pricePair === "AtoB" ? "Token B" : "Token A"
+          }`;
+          document.getElementById("status").className = "success";
+        } catch (error) {
+          console.log("Error en getPrice:", error);
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("calculateAmountA").onclick = async () => {
+        if (!simpleSwapContract) {
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          const amountBInput = document.getElementById("amountB").value;
+          if (!amountBInput || amountBInput <= 0) {
+            throw new Error("Ingresa cantidad válida para Token B.");
+          }
+          const amountB = ethers.utils.parseUnits(amountBInput, 18);
+          const reserves = await simpleSwapContract.reserves(
+            tokenAAddress,
+            tokenBAddress
+          );
+          if (reserves.reserveB.eq(0)) {
+            throw new Error("No hay liquidez para calcular proporción.");
+          }
+          const amountA = amountB.mul(reserves.reserveA).div(reserves.reserveB);
+          document.getElementById("amountA").value = ethers.utils.formatUnits(
+            amountA,
+            18
+          );
+          document.getElementById(
+            "status"
+          ).innerText = `Calculado: ${ethers.utils.formatUnits(
+            amountA,
+            18
+          )} Token A`;
+          document.getElementById("status").className = "success";
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("approveTokensForLiquidity").onclick =
+        async () => {
+          if (!signer) {
+            document.getElementById("status").innerText =
+              "Conecta MetaMask primero.";
+            document.getElementById("status").className = "error";
+            return;
+          }
+          try {
+            const amountA = ethers.utils.parseUnits(
+              document.getElementById("amountA").value || "0",
+              18
+            );
+            const amountB = ethers.utils.parseUnits(
+              document.getElementById("amountB").value || "0",
+              18
+            );
+            if (amountA.lte(0) || amountB.lte(0)) {
+              throw new Error("Ingresa cantidades válidas.");
+            }
+            const balanceA = await tokenAContract.balanceOf(
+              await signer.getAddress()
+            );
+            const balanceB = await tokenBContract.balanceOf(
+              await signer.getAddress()
+            );
+            if (balanceA.lt(amountA)) {
+              throw new Error(
+                `Saldo insuficiente: ${ethers.utils.formatUnits(
+                  balanceA,
+                  18
+                )} Token A.`
+              );
+            }
+            if (balanceB.lt(amountB)) {
+              throw new Error(
+                `Saldo insuficiente: ${ethers.utils.formatUnits(
+                  balanceB,
+                  18
+                )} Token B.`
+              );
+            }
+            let tx = await tokenAContract.approve(simpleSwapAddress, amountA, {
+              gasLimit: 100000,
+            });
+            document.getElementById("status").innerText =
+              "Aprobando Token A...";
+            await tx.wait();
+            tx = await tokenBContract.approve(simpleSwapAddress, amountB, {
+              gasLimit: 100000,
+            });
+            document.getElementById("status").innerText =
+              "Aprobando Token B...";
+            await tx.wait();
+            document.getElementById("status").innerText = "Tokens aprobados.";
+            document.getElementById("status").className = "success";
+          } catch (error) {
+            document.getElementById(
+              "status"
+            ).innerText = `Error: ${error.message}`;
+            document.getElementById("status").className = "error";
+          }
+        };
+
+      document.getElementById("addLiquidity").onclick = async () => {
+        if (!signer) {
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          const amountA = ethers.utils.parseUnits(
+            document.getElementById("amountA").value || "0",
+            18
+          );
+          const amountB = ethers.utils.parseUnits(
+            document.getElementById("amountB").value || "0",
+            18
+          );
+          if (amountA.lte(0) || amountB.lte(0)) {
+            throw new Error("Ingresa cantidades válidas.");
+          }
+          const reserves = await simpleSwapContract.reserves(
+            tokenAAddress,
+            tokenBAddress
+          );
+          if (!reserves.reserveB.eq(0)) {
+            const expectedA = amountB
+              .mul(reserves.reserveA)
+              .div(reserves.reserveB);
+            const tolerance = expectedA.mul(1).div(100);
+            if (
+              amountA.lt(expectedA.sub(tolerance)) ||
+              amountA.gt(expectedA.add(tolerance))
+            ) {
+              throw new Error(
+                `Proporción incorrecta. Usa ~${ethers.utils.formatUnits(
+                  expectedA,
+                  18
+                )} Token A.`
+              );
+            }
+          }
+          const amountAMin = amountA.mul(99).div(100);
+          const amountBMin = amountB.mul(99).div(100);
+          const to = await signer.getAddress();
+          const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+          const tx = await simpleSwapContract.addLiquidity(
+            tokenAAddress,
+            tokenBAddress,
+            amountA,
+            amountB,
+            amountAMin,
+            amountBMin,
+            to,
+            deadline,
+            { gasLimit: 800000 }
+          );
+          document.getElementById("status").innerText = "Agregando liquidez...";
+          await tx.wait();
+          document.getElementById("status").innerText = "Liquidez agregada.";
+          document.getElementById("status").className = "success";
+          document.getElementById(
+            "liquidity"
+          ).innerText = `Agregaste ${ethers.utils.formatUnits(
+            amountA,
+            18
+          )} Token A y ${ethers.utils.formatUnits(amountB, 18)} Token B.`;
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("approveToken").onclick = async () => {
+        if (!signer) {
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          const tokenIn = document.getElementById("tokenIn").value;
+          const amountIn = ethers.utils.parseUnits(
+            document.getElementById("amountIn").value || "0",
+            18
+          );
+          const tokenContract = new ethers.Contract(tokenIn, tokenAbi, signer);
+          const balance = await tokenContract.balanceOf(
+            await signer.getAddress()
+          );
+          if (balance.lt(amountIn)) {
+            throw new Error(
+              `Saldo insuficiente: ${ethers.utils.formatUnits(balance, 18)} ${
+                tokenIn === tokenAAddress ? "Token A" : "Token B"
+              }.`
+            );
+          }
+          const tx = await tokenContract.approve(simpleSwapAddress, amountIn, {
+            gasLimit: 100000,
+          });
+          document.getElementById("status").innerText = "Aprobando...";
+          await tx.wait();
+          document.getElementById("status").innerText = "Token aprobado.";
+          document.getElementById("status").className = "success";
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      document.getElementById("swapTokens").onclick = async () => {
+        if (!signer) {
+          document.getElementById("status").innerText =
+            "Conecta MetaMask primero.";
+          document.getElementById("status").className = "error";
+          return;
+        }
+        try {
+          const tokenIn = document.getElementById("tokenIn").value;
+          const tokenOut = document.getElementById("tokenOut").value;
+          const amountInInput = document.getElementById("amountIn").value;
+          if (!amountInInput || amountInInput <= 0) {
+            throw new Error("Ingresa cantidad válida.");
+          }
+          const amountIn = ethers.utils.parseUnits(amountInInput, 18);
+          const slippage = parseFloat(
+            document.getElementById("slippage").value
+          );
+
+          const isSorted = tokenIn < tokenOut;
+          const token0 = isSorted ? tokenIn : tokenOut;
+          const token1 = isSorted ? tokenOut : tokenIn;
+          const reserves = await simpleSwapContract.reserves(token0, token1);
+
+          const reserveIn = isSorted ? reserves.reserveA : reserves.reserveB;
+          const reserveOut = isSorted ? reserves.reserveB : reserves.reserveA;
+
+          if (reserveIn.eq(0) || reserveOut.eq(0)) {
+            throw new Error("No hay liquidez para este swap.");
+          }
+          if (amountIn.gt(reserveIn)) {
+            throw new Error(
+              `Cantidad (${amountInInput} ${
+                tokenIn === tokenAAddress ? "Token A" : "Token B"
+              }) excede liquidez (${ethers.utils.formatUnits(reserveIn, 18)}).`
+            );
+          }
+
+          const amountOut = getAmountOut(amountIn, reserveIn, reserveOut);
+          const amountOutMin = amountOut.mul(100 - slippage).div(100);
+
+          const to = await signer.getAddress();
+          const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+
+          const tx = await simpleSwapContract.swapExactTokensForTokens(
+            amountIn,
+            amountOutMin,
+            [tokenIn, tokenOut],
+            to,
+            deadline,
+            { gasLimit: 800000 }
+          );
+          document.getElementById(
+            "status"
+          ).innerText = `Swap en curso... Hash: ${tx.hash}`;
+          await tx.wait();
+          document.getElementById("status").innerText = "Swap realizado.";
+          document.getElementById("status").className = "success";
+
+          const balanceA = await tokenAContract.balanceOf(to);
+          const balanceB = await tokenBContract.balanceOf(to);
+          document.getElementById(
+            "balance"
+          ).innerText = `Saldo:\nToken A: ${ethers.utils.formatUnits(
+            balanceA,
+            18
+          )}\nToken B: ${ethers.utils.formatUnits(balanceB, 18)}`;
+        } catch (error) {
+          document.getElementById(
+            "status"
+          ).innerText = `Error: ${error.message}`;
+          document.getElementById("status").className = "error";
+        }
+      };
+
+      function getAmountOut(amountIn, reserveIn, reserveOut) {
+        const amountInWithFee = amountIn.mul(997);
+        const numerator = amountInWithFee.mul(reserveOut);
+        const denominator = reserveIn.mul(1000).add(amountInWithFee);
+        return numerator.div(denominator);
+      }
+    </script>
+  </body>
+</html>
