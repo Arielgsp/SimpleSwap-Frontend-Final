@@ -1,13 +1,13 @@
-# Sample Hardhat Project
+# SimpleSwap
 
-This project demonstrates a basic Hardhat use case. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.
+SimpleSwap es un contrato inteligente desarrollado en Solidity para un intercambio descentralizado (DEX) que permite agregar y remover liquidez, realizar swaps de tokens ERC-20, y consultar precios entre pares de tokens. Está desplegado en la red Sepolia en la dirección `0x61c471eee1Dc2cf08ee9620B6c0E89A0aa252E31`.
 
-Try running some of the following tasks:
+## Características
 
-```shell
-npx hardhat help
-npx hardhat test
-REPORT_GAS=true npx hardhat test
-npx hardhat node
-npx hardhat ignition deploy ./ignition/modules/Lock.js
-```
+- **Agregar Liquidez**: Permite a los usuarios añadir tokens a un par de liquidez, recibiendo tokens de liquidez a cambio.
+- **Remover Liquidez**: Permite retirar tokens del par quemando tokens de liquidez.
+- **Swap de Tokens**: Facilita el intercambio de tokens ERC-20 (Token A a Token B) con base en las reservas del par.
+- **Consulta de Precios**: Calcula el precio de un token en términos de otro según las reservas actuales.
+- **Seguridad**: Incluye verificaciones de deadline y cantidades mínimas para transacciones seguras.
+- **Tests**: cobertura ≥50%.
+- **Front-end**: Interfaz web para interactuar con el contrato (agregar liquidez, swap, consultar precios).
